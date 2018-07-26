@@ -479,13 +479,14 @@ class BaseStage(object):
         seen = set()
         for stage, res in self.op_sro_check_mirror_whitelist(
             "get_simplelinks_perstage", project=project):
-            for key, href in res:
+            for key_and_href in res:
+                key, href = key_and_href
                 if key not in seen:
                     seen.add(key)
-                    all_links.append((key, href))
+                    all_links.append(key_and_href)
         if sorted_links:
-           all_links = [(v.key, v.href)
-                        for v in sorted(map(SimplelinkMeta, all_links), reverse=True)]
+            all_links = [v.key_and_href
+                         for v in sorted(map(SimplelinkMeta, all_links), reverse=True)]
         return all_links
 
     def get_mirror_whitelist_info(self, project):
@@ -850,7 +851,12 @@ class ELink(object):
         try:
             return self.linkdict[name]
         except KeyError:
-            if name in ("for_entrypath", "eggfragment", "rel"):
+            if name in (
+                "eggfragment",
+                "for_entrypath",
+                "requires_python",
+                "rel",
+            ):
                 return None
             raise AttributeError(name)
 
@@ -985,7 +991,7 @@ class SimplelinkMeta(CompareMixin):
     """ helper class to provide information for items from get_simplelinks() """
     def __init__(self, key_href):
         self.key, self.href = key_href
-        self._url = URL(self.href)
+        self._url = URL(self.href, requires_python=getattr(key_href, 'requires_python', None))
         self.name, self.version, self.ext = splitbasename(self._url.basename, checkarch=False)
         self.eggfragment = self._url.eggfragment
 
@@ -1002,6 +1008,23 @@ class SimplelinkMeta(CompareMixin):
         else:
             return self.version
 
+    @property
+    def key_and_href(self):
+        return _KeyAndHrefCompat(self.key, self.href,
+                                 requires_python=self._url.requires_python)
+
+
+class _KeyAndHrefCompat(tuple):
+    """
+    A class that mimics backward-compatible behavior for make_key_and_href()
+    while providing access to extra attributes.
+    """
+    def __new__(cls, key, href, requires_python=None):
+        return tuple.__new__(cls, (key, href))
+
+    def __init__(self, key, href, requires_python=None):
+        self.requires_python = requires_python
+
 
 def make_key_and_href(entry):
     # entry is either an ELink or a filestore.FileEntry instance.
@@ -1011,8 +1034,10 @@ def make_key_and_href(entry):
         href += "#" + entry.hash_spec
     elif entry.eggfragment:
         href += "#egg=%s" % entry.eggfragment
-        return entry.eggfragment, href
-    return entry.basename, href
+        return _KeyAndHrefCompat(entry.eggfragment, href,
+                                 requires_python=entry.requires_python)
+    return _KeyAndHrefCompat(entry.basename, href,
+                             requires_python=entry.requires_python)
 
 
 def normalize_bases(model, bases):

@@ -22,6 +22,8 @@ def _joinpath(url, args, asdir=False):
 
 class URL:
     def __init__(self, url="", *args, **kwargs):
+        self.requires_python = kwargs.pop('requires_python', None)
+
         if isinstance(url, URL):
             url = url.url
         if args:

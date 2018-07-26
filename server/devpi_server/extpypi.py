@@ -19,10 +19,19 @@ from devpi_common.types import cached_property
 from devpi_common.validation import normalize_name
 from functools import partial
 
-from .model import BaseStage, make_key_and_href, SimplelinkMeta
-from .model import InvalidIndexconfig, get_indexconfig
-from .readonly import ensure_deeply_readonly
 from .log import threadlog
+from .model import (
+    BaseStage,
+    InvalidIndexconfig,
+    SimplelinkMeta,
+    _KeyAndHrefCompat,
+    get_indexconfig,
+    make_key_and_href,
+)
+from .readonly import (
+    ensure_deeply_readonly,
+    get_mutable_deepcopy,
+)
 
 
 class IndexParser:
@@ -34,8 +43,18 @@ class IndexParser:
         self.egglinks = []
 
     def _mergelink_ifbetter(self, newurl):
+        """
+        Stores a link given it's better fit than an existing one (if any).
+
+        A link with hash_spec replaces one w/o it, even if the latter got other
+        non-empty attributes (like requires_python), unlike the former.
+        As soon as the first link with hash_spec is encountered, those that
+        appear later are ignored.
+        """
         entry = self.basename2link.get(newurl.basename)
-        if entry is None or (not entry.hash_spec and newurl.hash_spec):
+        if entry is None or not entry.hash_spec and (newurl.hash_spec or (
+            not entry.requires_python and newurl.requires_python
+        )):
             self.basename2link[newurl.basename] = newurl
             threadlog.debug("indexparser: adding link %s", newurl)
         else:
@@ -52,7 +71,7 @@ class IndexParser:
         p = HTMLPage(html, disturl.url)
         seen = set()
         for link in p.links:
-            newurl = URL(link.url)
+            newurl = URL(link.url, requires_python=link.requires_python)
             if not newurl.is_valid_http_url():
                 continue
             eggfragment = newurl.eggfragment
@@ -239,6 +258,18 @@ class PyPIStage(BaseStage):
     def _save_cache_links(self, project, links, serial):
         assert isinstance(serial, int)
         assert project == normalize_name(project), project
+
+        # covert _KeyAndHrefCompat into plain tuples
+        link_list = []
+        for key_and_href in links:
+            links_item = key_and_href
+            if hasattr(key_and_href, 'requires_python'):
+                links_item += (key_and_href.requires_python,)
+            link_list.append(links_item)
+
+        # preserve sequence type: () defines a non-existing project
+        links = type(links)(link_list)
+
         data = {"serial": serial, "links": links}
         key = self.key_projsimplelinks(project)
         old = key.get()
@@ -259,6 +290,21 @@ class PyPIStage(BaseStage):
         if cache:
             is_fresh = self.cache_link_updates.is_fresh(project, self.cache_expiry)
             links, serial = cache["links"], cache["serial"]
+
+            # covert plain tuples into _KeyAndHrefCompat
+            link_list = []
+            for links_item in links:
+                if len(links_item) > 2:
+                    requires_python = links_item[2]
+                else:
+                    requires_python = None
+                link_list.append(_KeyAndHrefCompat(
+                    *links_item[:2], requires_python=requires_python
+                ))
+
+            # preserve sequence type: () defines a non-existing project
+            links = type(get_mutable_deepcopy(links))(link_list)
+
             if self.xom.config.args.offline_mode and links:
                 links = ensure_deeply_readonly(list(filter(self._is_file_cached, links)))
 

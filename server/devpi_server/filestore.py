@@ -80,6 +80,7 @@ class FileStore:
                 threadlog.error(err)
                 entry.file_delete()
         entry.hash_spec = unicode_if_bytes(link.hash_spec)
+        entry.requires_python = link.requires_python
         return entry
 
     def get_file_entry(self, relpath, readonly=True):
@@ -130,6 +131,7 @@ class FileEntry(object):
     url = metaprop("url")
     project = metaprop("project")
     version = metaprop("version")
+    requires_python = metaprop("requires_python")
 
     def __init__(self, xom, key, meta=_nodefault, readonly=True):
         self.xom = xom

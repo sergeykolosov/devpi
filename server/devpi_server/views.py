@@ -4,6 +4,10 @@ import collections
 import os
 import py
 import re
+try:
+    from html import escape
+except ImportError:
+    from cgi import escape
 from time import time
 from devpi_common.types import ensure_unicode
 from devpi_common.url import URL
@@ -489,11 +493,22 @@ class PyPIView:
             def make_url(href):
                 return url.relpath("/" + href)
 
-        for key, href in result:
-            yield ('%s <a href="%s">%s</a><br/>\n' %
-                   ("/".join(href.split("/", 2)[:2]),
-                    make_url(href),
-                    key)).encode("utf-8")
+        for key_and_href in result:
+            key, href = key_and_href
+
+            if getattr(key_and_href, 'requires_python', None):
+                attrs = ' data-requires-python="%s"' % escape(
+                    key_and_href.requires_python, quote=True
+                )
+            else:
+                attrs = ''
+
+            yield ('%s <a href="%s"%s>%s</a><br/>\n' % (
+                "/".join(href.split("/", 2)[:2]),
+                make_url(href),
+                attrs,
+                key
+            )).encode("utf-8")
 
         yield "</body></html>".encode("utf-8")
 
